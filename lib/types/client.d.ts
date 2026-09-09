@@ -1,6 +1,6 @@
 /**
  * Client entry type stub. The client half is plain ESM importing React and
- * registering `slots`, `locale` and `conversationEvents` services.
+ * registering `slots`, `locale` and the `uiConversation` service.
  */
 export const name: 'dsh-retrace'
 export const inject: string[]
