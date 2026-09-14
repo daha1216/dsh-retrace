@@ -17,27 +17,34 @@
 
 ## 2. 视觉样式地图
 
-- **全局 CSS**：`const CSS = '...'` 模板串（搜 `.dsh-rt-user-row{` 定位，client.js ~1103 行起），运行时注入 `<style data-plugin-css="dsh-retrace-css">`。所有 `.dsh-rt-*` 类：chips（`-chip`/`-chip-danger`）、用户操作行（`-user-row`/`-user-actions`）、编辑器（`-editor`/`-textarea`/`-editor-buttons`/`-editor-send`/`-editor-cancel`）、报错（`-error`）、时间线/分叉 tab、marker 等。**同一字符串在 bundle 里还有一份，必须同步改**。
-- **组件**（createElement 写法，两文件平行镜像）：编辑/撤回 chips ~874/947（bundle ~695/759）、撤回 marker、retrace-reference 原文引用块、assistant-actions、轨迹/版本/分叉视图。
+- **全局 CSS**：`const CSS = '...'` 模板串（搜 `.dsh-rt-user-row{` 定位，client.js ~1103 行起），运行时注入 `<style data-plugin-css="dsh-retrace-css">`。所有 `.dsh-rt-*` 类：ghost chips（`-ghost`/`-ghost-danger`/`-ghost-armed`，对话页与阅读页注入器共用，单行文字钮、danger hover 红、armed 常红）、胶囊 chips（`-chip`/`-chip-danger`，时间线/轨迹/预览等对话框仍在用）、用户操作行（`-user-row`/`-user-actions`）、编辑器（`-editor`/`-textarea`/`-editor-buttons`/`-editor-send`/`-editor-cancel`）、报错（`-error`）、时间线/分叉 tab、marker 等。**同一字符串在 bundle 里还有一份，必须同步改**。
+- **组件**（createElement 写法，两文件平行镜像）：`UserActionsRow`（`conversation.chat.node` 的 `user-actions` slot，对话页）里的编辑/撤回 ghost chips 与两步确认；撤回 marker、retrace-reference 原文引用块、assistant-actions、轨迹/版本/分叉视图。
+- **阅读页注入器**（client.js ~1958 起，bundle 内有镜像）：`readerChatInfo` / `mountReaderChipRow` / `scanReaderClusters`，全部用原生 DOM API（非 createElement）——改完同样两个文件都要同步。
 - 设计 token 用 dsh web 主题的 `--dsw-alias-*`（label-primary/secondary/tertiary、interactive-bg-hover(-solid)、state-error-primary、border-l1/l2/l3、bg-base/elevated/module-platform），不要写死色值。
 
 ## 3. 与 dsh-better-display 的边界（重要）
 
-- **阅读 tab**（better-display 渲染）里的 编辑/撤回 按钮用的是 better-display 自己的 `.retraceChip` ghost 类，**改本仓库的 `.dsh-rt-chip` 只影响对话 tab**。
-- 但阅读 tab 的**编辑器和报错**复用本仓库的全局类 `.dsh-rt-editor` / `.dsh-rt-error` —— 改这两个类两边都会变。
-- 想两个视图风格统一（比如对话页胶囊改成阅读页的 ghost 风），要么同时改两个仓库，要么改完本仓库后去 better-display 对齐。
+**本仓库独占全部撤回操作 UI**（对话页 + 阅读页）；better-display 只做纯展示（v0.1.4+，不含任何操作 UI）。
+
+- **对话页**：官方 `conversation.chat.node` slot 的 `user-actions` → `UserActionsRow`，chips 用 `.dsh-rt-ghost` 单行 ghost 风；撤回两步确认（`RECALL_CONFIRM_MS=3000`，useRef 计时器 + unmount 清理）。
+- **阅读页**：better-display 不渲染 chat.node 槽位，改由本仓库的 DOM 注入器补 chips。
+  - 数据源：`readerChatInfo` 从 sessions store 取当前会话 nodes，建 `actionsBySeq`（seq→user-actions）/ `shadowedSeqs`（recall-marker）索引。
+  - 挂载：`mountReaderChipRow` 把 ghost chips 挂进 `button[aria-label="复制消息"]` 所在行，编辑器/报错挂消息簇末尾；挂载标记 `data-dsh-rt-reader="1"`；回填输入框用 textarea 原生 value setter + `input` 事件。
+  - 扫描：`scanReaderClusters` 用 MutationObserver（rAF 去抖）+ 1.5s interval；消息被 shadow 后自动摘除（cleanup 存于 `span._dshRtCleanup`）。
+- **锚点契约（不要单方面改）**：注入器只认 better-display 的稳定标记 `[data-reader-anchor][data-reader-key]` 定位用户消息簇，**不碰其内部 class**。better-display 侧必须保留这两个属性（它自己的 motion/滚动定位也依赖 `data-reader-anchor`）；改锚点前先与 better-display 侧对齐。
+- better-display 里旧的 `.retraceChip`/`.retraceChipDanger`/`.retraceChipArmed`/`.retraceRowBreak` 以及 `RetraceActions.tsx`/`callRetraceOp` 已在 v0.1.4 删除，不要在那边找回。本仓库的 `.dsh-rt-editor`/`.dsh-rt-textarea`/`.dsh-rt-error` 等类现在对话页与阅读页注入器共用，改这些类两边都会变。
 
 ## 4. 部署闭环（注意 profile 钉了 commit）
 
 ```sh
 # 1) bump package.json version；node --check 两个 lib 文件
 # 2) commit + push origin main
-# 3) profile 里是 "dsh-retrace": "github:daha1216/dsh-retrace#b9b6b6a" ——
+# 3) profile 里是 "dsh-retrace": "github:daha1216/dsh-retrace#101df7f" ——
 #    钉死的 spec 用 update 不会前进，必须重新 add 指到新 commit：
 powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/daha/.dsh/stop-dsh-web.ps1
 cd C:/Users/daha/.dsh && HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 dsh plugin --profile web add github:daha1216/dsh-retrace#<新hash>
 powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/daha/.dsh/launch-deepseek-harness.ps1 -NoOpen
-# 4) 刷新浏览器页面（插件 bundle 走 rev 缓存），在「对话」tab 验证 chips 视觉
+# 4) 刷新浏览器页面（插件 bundle 走 rev 缓存），在「对话」tab 和「阅读」tab 分别验证 chips 视觉（阅读页 chips 由本仓库注入器挂载）
 ```
 
 - E2E 习惯：role 定位器在本应用常超时，用 `tab.playwright.evaluate()` + `dispatchEvent(new MouseEvent("click",{bubbles:true}))`；输入框用 React 原生 value setter + `input` 事件。
