@@ -94,7 +94,7 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   const measure = () => p.evaluate(() => {
     const ed = document.querySelector('.dsh-rt-editor')
     const allRows = [...document.querySelectorAll('[data-chat-flow-kind="user-actions"] .dsh-rt-user-row')]
-    const row = ed ? ed.closest('.dsh-rt-user-row') : allRows[allRows.length - 1]
+    const row = ed ? (ed.previousElementSibling && ed.previousElementSibling.classList.contains('dsh-rt-user-row') ? ed.previousElementSibling : allRows[allRows.length - 1]) : allRows[allRows.length - 1]
     const chips = row ? row.querySelector('.dsh-rt-user-actions') : null
     const flow = row ? row.closest('[data-chat-flow-kind]') : null
     let prev = flow ? flow.previousElementSibling : null
@@ -109,7 +109,7 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
       rowTransform: row ? (row.style.transform || 'NONE') : 'NOROW',
       anchorTransform: metaRow ? (metaRow.style.transform || 'NONE') : 'NOMETA',
       gapBelowMeta: er && mr ? +(er.top - mr.bottom).toFixed(1) : null,
-      editorRight: er && mr ? +Math.abs(er.right - mr.right).toFixed(1) : null,
+      editorRight: er && prev ? +Math.abs(er.right - prev.getBoundingClientRect().right).toFixed(1) : null,
       chipsInline: cr && mr ? (cr.left > mr.left - 1 && Math.abs(cr.top - mr.top) < 10) : null,
       chipsRightAtColEdge: cr && prev ? Math.abs(cr.right - prev.getBoundingClientRect().right) < 4 : null
     }
@@ -121,7 +121,8 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   check('base: chips right edge on column edge', base.chipsRightAtColEdge === true)
   check('base: official row shifted left', base.anchorTransform.startsWith('translateX(-'))
 
-  // EDIT — editor must clear the parked translate and sit below the meta row
+  // EDIT — chips stay parked (0.4.39); the editor card is a flow sibling that
+  // must sit below the clock·copy row and stay clear of it.
   await p.evaluate(() => {
     const ghosts = [...document.querySelectorAll('.dsh-rt-ghost:not(.dsh-rt-ghost-danger)')]
     ghosts[ghosts.length - 1].scrollIntoView({ block: 'center' })
@@ -130,7 +131,7 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   await p.waitForTimeout(900)
   const ed = await measure()
   check('edit: editor opens', ed.editorOpen === true)
-  check('edit: parked row translate cleared (0.4.37)', ed.rowTransform === 'NONE', ed.rowTransform)
+  check('edit: chips stay mounted while editing (0.4.39)', ed.chipsInline === true, JSON.stringify(ed))
   check('edit: editor below clock·copy row', ed.gapBelowMeta !== null && ed.gapBelowMeta >= 0, `gap ${ed.gapBelowMeta}px`)
   check('edit: editor right edge flush with meta row', ed.editorRight !== null && ed.editorRight < 2, `Δ${ed.editorRight}px`)
   await p.screenshot({ path: 'C:/dsh/e2e-shots/e2e-layout-editor.png' })
@@ -139,7 +140,7 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   await p.evaluate(() => { const c = document.querySelector('.dsh-rt-editor-cancel'); if (c) c.click() })
   await p.waitForTimeout(900)
   const back = await measure()
-  check('cancel: chips re-park inline', back.editorOpen === false && back.chipsInline === true)
+  check('cancel: editor closes, chips still inline', back.editorOpen === false && back.chipsInline === true)
   check('cancel: chips right edge on column edge', back.chipsRightAtColEdge === true)
 
   // HEAL — clobber the transform; the filtered observer must restore it
