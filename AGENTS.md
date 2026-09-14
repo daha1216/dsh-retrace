@@ -18,7 +18,7 @@
 ## 2. 视觉样式地图
 
 - **全局 CSS**：``const CSS = `...` `` 模板串（用符号锚定：搜 ``const CSS = ` `` 或 `.dsh-rt-user-row{`，client.js 约 1124 行起、约 115 行后以单独一行反引号结束；行号会漂移，别写死）。`STYLE_ID = 'dsh-retrace-css'`（约 1123 行），由 `ensureStyle()` 注入；运行时注入的标签是 **`<style data-plugin-css="dsh-retrace-css">`，没有 `id` 属性**，探测部署是否生效用 `document.querySelector('style[data-plugin-css="dsh-retrace-css"]')`（**不要用 `#dsh-retrace-css`**）。所有 `.dsh-rt-*` 类：ghost chips（`-ghost`/`-ghost-danger`/`-ghost-armed`，对话页与阅读页注入器共用，单行文字钮、danger hover 红、armed 常红）、胶囊 chips（`-chip`/`-chip-danger`，时间线/轨迹/预览等对话框仍在用）、用户操作行（`-user-row`/`-user-actions`）、编辑器（`-editor`/`-textarea`/`-editor-buttons`/`-editor-send`/`-editor-cancel`）、报错（`-error`）、时间线/分叉 tab、marker 等。**同一字符串在 bundle 里还有一份，必须同步改**。
-- **组件**（createElement 写法，两文件平行镜像）：`UserActionsRow`（约 891 行，注册到 `conversation.chat.node` 的 `user-actions` slot，对话页）里的编辑/撤回 ghost chips 与两步确认；另注册 `retrace-reference` / `recall-marker` 等 node slot 与 `conversation.chat.assistant-actions`（`AssistantActions`），以及 timeline/版本/分叉视图。**0.4.39 双修复**：①四处 seat 注册（`AssistantActions` / `UserActionsRow` / `ReferenceRow` / `RecallMarkerRow`）统一经 `withSeatPropsGuard` 包装——props 为 null/undefined 或缺 propKey 时渲染 null，保住 entry 性命（此前槽位机制以 null props 重渲染一次 → 解构抛 React #300 → 该 entry 永久弃权成死格子，表现为撤回一次后所有用户消息的 chips 永久消失）；②`UserActionsRow` 编辑态 chips 行常驻不换走，编辑框作为 Fragment 兄弟节点渲染在其下方流内（CSS 折叠规则带 `:not(:has(.dsh-rt-editor))` 逃生口）。
+- **组件**（createElement 写法，两文件平行镜像）：`UserActionsRow`（约 891 行，注册到 `conversation.chat.node` 的 `user-actions` slot，对话页）里的编辑/撤回 ghost chips 与两步确认；另注册 `retrace-reference` / `recall-marker` 等 node slot 与 `conversation.chat.assistant-actions`（`AssistantActions`），以及 timeline/版本/分叉视图。**0.4.39**：①四处 seat 注册（`AssistantActions` / `UserActionsRow` / `ReferenceRow` / `RecallMarkerRow`）统一经 `withSeatPropsGuard` 包装——props 为 null/undefined 或缺 propKey 时渲染 null（修的是「槽位以 null props 重渲染 entry」路径；该路径真实存在，但**不是**「撤回后 chips 永久消失」的根因）；②`UserActionsRow` 编辑态 chips 行常驻不换走，编辑框作为 Fragment 兄弟节点渲染在其下方流内（CSS 折叠规则带 `:not(:has(.dsh-rt-editor))` 逃生口）。**0.4.40（真根因）**：`UserActionsRow` / `RecallMarkerRow` 的 hidden/shadowed、compact 早退原本夹在 hook 序列中间——撤回把已挂载 entry 的 hidden/shadowed 翻转成 true 后，该次渲染少跑一个 `useEffect` → React #300（Rendered fewer hooks than expected）→ 槽位边界 `reportEntryError({abdicate:true})` → 该注册**永久弃权**成 `[data-slot-error]` 死格子，表现为撤回一次后所有用户消息的 chips 永久消失（刷新才恢复）；修复=全部 hook 执行完再早退。**seat 组件内禁止在 hook 之间提前 return（含条件 return null）**。
 - **布局对齐器**（符号锚定 `chatActionAnchor` / `chatAnchorTransform` / `alignChatActionRows` / `isLayoutRelevant` / `installChatActionAligner`）：chips 内联进「时间·复制」行的几何引擎（0.4.36 方案 + 0.4.37 编辑态清位移）；observer 只对相关 mutation 调度重测（见 `isLayoutRelevant` 注释）。
 - 设计 token 用 dsh web 主题的 `--dsw-alias-*`（label-primary/secondary/tertiary、interactive-bg-hover(-solid)、state-error-primary、border-l1/l2/l3、bg-base/elevated/module-platform），不要写死色值。
 
@@ -31,7 +31,7 @@ better-display 已于 2026-09-14 从 web profile 卸载（用户不要独立阅�
 
 ## 4. 部署闭环（注意 profile 钉了 commit）
 
-**当前版本**：v0.4.39。profile（`C:/Users/daha/.dsh/profiles/web/package.json`）里钉的是
+**当前版本**：v0.4.40。profile（`C:/Users/daha/.dsh/profiles/web/package.json`）里钉的是
 `"dsh-retrace": "github:daha1216/dsh-retrace#<commit>"`（hash 随部署更新，以 profile 实况为准）。
 
 **改完视觉样式后的最小验证闭环**（每步都别跳，缺一步就可能在旧代码上白验）：
@@ -41,6 +41,7 @@ better-display 已于 2026-09-14 从 web profile 卸载（用户不要独立阅�
 node --check lib/client.js && node --check lib/client.bundle.js
 # 2) 布局 E2E（需要本机 dsh web 跑着；脚本把本地 bundle splice 进页面模块，不动线上）
 #    断言：chips 内联且右缘贴列缘 / 编辑器不遮时间·复制行（0.4.37 回归项）/ 取消后回 park
+#    / 真撤回回归（0.4.40：新建一次性会话→真撤回两步→再发新消息仍须有 chips→删会话）
 #    / observer 400ms 内自愈（过滤器不误杀相关 mutation）/ armed 两步确认只读验证
 #    / 双文件符号镜像一致 / 零控制台错误
 node scripts/e2e-layout.cjs

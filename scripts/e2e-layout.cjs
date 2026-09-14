@@ -8,6 +8,10 @@
 //   EDIT    editor opens: row transform cleared, sits BELOW the clock·copy
 //           row (the 0.4.37 overlap regression), anchor released
 //   CANCEL  chips re-park inline
+//   RECALL  a REAL two-step recall in a throwaway session this script creates
+//           and deletes: the recalled entry must not abdicate, and the
+//           follow-up message must still get its chips (v0.4.40 regression —
+//           a mid-hook early return used to crash the seat with React #300)
 //   ARMED   first recall click arms the chip (READ-ONLY: never a second click)
 //   HEAL    clobbering the row's transform self-heals via observer/interval
 // plus node --check + mirror-symbol parity on both lib files.
@@ -25,8 +29,17 @@ const path = require('path')
 const ROOT = path.resolve(__dirname, '..')
 const WEB_URL = process.env.DSH_WEB_URL || 'http://127.0.0.1:3080'
 const WEB_LOG = process.env.DSH_WEB_LOG || 'C:/Users/daha/.dsh/logs/dsh-web.stdout.log'
+// dsh web writes its token to different logs depending on how it was started
+// (start-dsh-web.bat → ~/.dsh/dsh-web.log; the launcher → logs/*.stdout.log)
+// and every restart rotates the token, so collect candidates from the freshest
+// log first and fall back in the UI if the app does not boot with it.
+const LOG_PATHS = [...new Set([WEB_LOG, 'C:/Users/daha/.dsh/dsh-web.log', 'C:/Users/daha/.dsh/logs/dsh-web.stdout.log'])]
+  .filter((f) => { try { return fs.statSync(f).size > 0 } catch { return false } })
+  .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+const TOKENS = [...new Set(LOG_PATHS.flatMap((f) => (fs.readFileSync(f, 'utf8').match(/token=([^\s)]+)/g) || []).map((t) => t.slice(6))))]
 const WEBKIT_PATH = process.env.DSH_WEBKIT_PATH
   || 'C:/dsh/deepseek-harness/node_modules/.pnpm/playwright@1.61.1/node_modules/playwright'
+if (TOKENS.length === 0) { console.error('no dsh web token found in', LOG_PATHS); process.exit(1) }
 
 const results = []
 const check = (name, ok, detail) => {
@@ -76,20 +89,167 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     await route.fulfill({ response: resp, body })
   })
 
-  await p.goto(`${WEB_URL}/?token=${TOKEN}`, { waitUntil: 'networkidle', timeout: 30000 })
-  await p.waitForTimeout(9000)
+  // Pick a token the RUNNING server actually accepts (every restart rotates
+  // it): 401 = stale log entry, anything else = accepted.
+  const probeToken = async (t) => {
+    try {
+      const res = await fetch(`${WEB_URL}/?token=${t}`, { redirect: 'manual' })
+      return res.status !== 401
+    } catch { return false }
+  }
+  let token = null
+  for (const t of TOKENS) { if (await probeToken(t)) { token = t; break } }
+  if (token === null) { console.log('FAIL  no candidate token accepted by the running server'); await b.close(); process.exit(1) }
+
+  await p.goto(`${WEB_URL}/?token=${token}`, { waitUntil: 'domcontentloaded', timeout: 30000 })
+  let booted = false
+  for (let i = 0; i < 30; i++) {
+    booted = await p.evaluate(() => document.querySelectorAll('[class*="sessionRow"]').length > 0)
+    if (booted) break
+    await p.waitForTimeout(1000)
+  }
+  if (!booted) console.log('WARN  app did not boot with the accepted token; continuing')
+  await p.waitForTimeout(1500)
+
+  // --- helpers for the real-recall regression (v0.4.40) ---------------------
+  // Session rows expose their exact title through the row menu's aria-label
+  // (`会话“<title>”的操作`), so we can find/verify/delete by exact title.
+  const listSessionTitles = () => p.evaluate(() => [...document.querySelectorAll('button[aria-label*="的操作"]')].map((b) => {
+    const m = (b.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
+    return m ? m[1] : null
+  }).filter(Boolean))
+
+  const clickSessionByTitle = (title) => p.evaluate((t) => {
+    const btn = [...document.querySelectorAll('button[aria-label*="的操作"]')].find((b) => {
+      const m = (b.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
+      return m && m[1] === t
+    })
+    const row = btn && btn.closest('[class*="sessionRow"]')
+    if (!row) return false
+    row.click()
+    return true
+  }, title)
+
+  const deleteSessionByTitle = async (title) => {
+    const opened = await p.evaluate((t) => {
+      const btn = [...document.querySelectorAll('button[aria-label*="的操作"]')].find((b) => {
+        const m = (b.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
+        return m && m[1] === t
+      })
+      if (!btn) return 'NO_ROW'
+      btn.click()
+      return 'MENU_OPEN'
+    }, title)
+    if (opened !== 'MENU_OPEN') return opened
+    await p.waitForTimeout(600)
+    const item = await p.evaluate(() => {
+      const it = [...document.querySelectorAll('[role="menuitem"], button')].filter((n) => n.offsetParent !== null).find((n) => /^删除会话$/.test((n.textContent || '').trim()))
+      if (!it) return 'NO_ITEM'
+      it.click()
+      return 'DELETE_ITEM'
+    })
+    if (item !== 'DELETE_ITEM') { await p.keyboard.press('Escape'); return item }
+    await p.waitForTimeout(900)
+    const confirmed = await p.evaluate((t) => {
+      const d = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter((n) => n.offsetParent !== null)[0]
+      if (!d) return 'NO_DIALOG'
+      if (!(d.textContent || '').includes(t)) return 'TITLE_MISMATCH'
+      const btn = [...d.querySelectorAll('button')].find((b) => /^删除会话$/.test((b.textContent || '').trim()))
+      if (!btn) return 'NO_CONFIRM'
+      btn.click()
+      return 'CONFIRMED'
+    }, title)
+    if (confirmed !== 'CONFIRMED') { await p.keyboard.press('Escape'); return confirmed }
+    for (let i = 0; i < 60; i++) {
+      await p.waitForTimeout(1000)
+      const still = await p.evaluate((t) => [...document.querySelectorAll('button[aria-label*="的操作"]')].some((b) => {
+        const m = (b.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
+        return m && m[1] === t
+      }), title)
+      if (!still) return true
+    }
+    return 'TIMEOUT'
+  }
+
+  // Wait until the conversation stops growing (reply finished) — the host
+  // refuses recall while the agent is still responding.
+  const waitReplySettled = async (tag, maxMs = 240000) => {
+    const t0 = Date.now()
+    let prev = await p.evaluate(() => document.body.innerText.length)
+    let stable = 0
+    while (Date.now() - t0 < maxMs) {
+      await p.waitForTimeout(5000)
+      const cur = await p.evaluate(() => document.body.innerText.length)
+      stable = cur === prev ? stable + 1 : 0
+      prev = cur
+      if (stable >= 2) return true
+    }
+    console.log(`  [${tag}] reply did not settle within ${maxMs}ms; continuing`)
+    return false
+  }
+
+  const typeAndSend = async (text) => p.evaluate((text) => {
+    const box = document.querySelector('[contenteditable="true"]')
+    if (!box) return 'NO_BOX'
+    box.focus()
+    document.execCommand('selectAll')
+    document.execCommand('delete')
+    document.execCommand('insertText', false, text)
+    return 'TYPED'
+  }, text).then(async (typed) => {
+    await p.waitForTimeout(400)
+    const sent = await p.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('aria-label') || '').startsWith('发送消息'))
+      if (!btn) return 'NO_BTN'
+      if (btn.disabled) return 'DISABLED'
+      btn.click()
+      return 'SENT'
+    })
+    return `${typed}/${sent}`
+  })
 
   let found = false
+  let baseSessionTitle = null
+  // the sidebar may render late: wait for its rows before picking a session
+  for (let i = 0; i < 20; i++) {
+    const n = await p.evaluate(() => document.querySelectorAll('[class*="sessionRow"]').length)
+    if (n > 0) break
+    await p.waitForTimeout(1000)
+  }
+  const picked = []
   for (let k = 0; k < 6 && !found; k++) {
     await p.evaluate((k) => {
       const rows = [...document.querySelectorAll('[class*="sessionRow"]')]
         .filter((el) => !/^(新会话|new session)$/i.test((el.textContent || '').trim()))
       if (rows[k]) rows[k].click()
     }, k)
-    await p.waitForTimeout(4500)
-    found = await p.evaluate(() => document.querySelectorAll('[data-chat-flow-kind="user-actions"] .dsh-rt-user-row').length > 0)
+    await p.waitForTimeout(5500)
+    const st = await p.evaluate(() => ({
+      rows: document.querySelectorAll('[data-chat-flow-kind="user-actions"] .dsh-rt-user-row').length,
+      users: document.querySelectorAll('[data-chat-flow-kind="user"]').length,
+      slotErrors: document.querySelectorAll('[data-slot-error]').length,
+      styles: !!document.querySelector('style[data-plugin-css="dsh-retrace-css"]'),
+    }))
+    picked.push({ k, ...st })
+    found = st.rows > 0
+    if (found) {
+      baseSessionTitle = await p.evaluate((k) => {
+        const rows = [...document.querySelectorAll('[class*="sessionRow"]')]
+          .filter((el) => !/^(新会话|new session)$/i.test((el.textContent || '').trim()))
+        const btn = rows[k] && rows[k].querySelector('button[aria-label*="的操作"]')
+        const m = btn && (btn.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
+        return m ? m[1] : null
+      }, k)
+    }
   }
-  if (!found) { console.log('FAIL  no session with chips found (need a session with user messages)'); await b.close(); process.exit(1) }
+  if (!found) {
+    const titles = await p.evaluate(() => [...document.querySelectorAll('[class*="sessionRow"]')].map((el) => (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30)).slice(0, 8))
+    console.log('FAIL  no session with chips found (need a session with user messages)')
+    console.log('      sidebar rows:', JSON.stringify(titles))
+    console.log('      per-click:', JSON.stringify(picked))
+    await b.close()
+    process.exit(1)
+  }
 
   const measure = () => p.evaluate(() => {
     const ed = document.querySelector('.dsh-rt-editor')
@@ -120,6 +280,71 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   check('base: chips inline with clock·copy row', base.chipsInline === true, JSON.stringify(base))
   check('base: chips right edge on column edge', base.chipsRightAtColEdge === true)
   check('base: official row shifted left', base.anchorTransform.startsWith('translateX(-'))
+
+  // RECALL (v0.4.40 regression) — a REAL recall must not abdicate the seat.
+  // Runs in a throwaway session this script creates and deletes itself: send a
+  // message, recall it with the real two-step flow, then send another message —
+  // which must still get its chips. Before 0.4.40 the recalled entry dropped a
+  // hook mid-sequence (React #300) and the slot registration abdicated for the
+  // rest of the page, so every later message lost its edit/recall chips.
+  const sessionTitlesBefore = await listSessionTitles()
+  try {
+    await p.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('aria-label') || '') === '新建会话' && (b.className || '').includes('newSession'))
+      if (btn) btn.click()
+    })
+    await p.waitForTimeout(3000)
+    console.log('  [recall] send1:', await typeAndSend('撤回回归测试：只需回复「收到」，不要调用任何工具。'))
+    await waitReplySettled('recall-msg1')
+    const seeded = await p.evaluate(() => ({
+      seats: document.querySelectorAll('[data-chat-flow-kind="user-actions"] .dsh-rt-user-row').length,
+      slotErrors: document.querySelectorAll('[data-slot-error]').length,
+    }))
+    check('recall: throwaway message has chips', seeded.seats === 1 && seeded.slotErrors === 0, JSON.stringify(seeded))
+
+    await p.evaluate(() => {
+      const seats = [...document.querySelectorAll('[data-chat-flow-kind="user-actions"]')]
+      const chip = seats.length ? seats[seats.length - 1].querySelector('.dsh-rt-ghost.dsh-rt-ghost-danger') : null
+      if (chip) { chip.scrollIntoView({ block: 'center' }); chip.click() }
+    })
+    await p.waitForTimeout(500)
+    check('recall: first click arms the two-step confirm', await p.evaluate(() => !!document.querySelector('.dsh-rt-ghost-armed')))
+    await p.evaluate(() => { const a = document.querySelector('.dsh-rt-ghost-armed'); if (a) a.click() })
+    await p.waitForTimeout(3500)
+    await waitReplySettled('recall-confirm', 45000)
+    const recalled = await p.evaluate(() => ({
+      markers: document.querySelectorAll('.dsh-rt-marker').length,
+      slotErrors: document.querySelectorAll('[data-slot-error]').length,
+    }))
+    check('recall: real recall executed (marker written)', recalled.markers > 0, JSON.stringify(recalled))
+    check('recall: no dead cells after the recall (v0.4.40)', recalled.slotErrors === 0, JSON.stringify(recalled))
+
+    console.log('  [recall] send2:', await typeAndSend('撤回回归测试乙：只需回复「好」，不要调用任何工具。'))
+    await waitReplySettled('recall-msg2')
+    const afterRecall = await p.evaluate(() => {
+      const seats = [...document.querySelectorAll('[data-chat-flow-kind="user-actions"]')]
+      const last = seats[seats.length - 1]
+      return {
+        seats: seats.length,
+        lastHasActions: !!(last && last.querySelector('.dsh-rt-user-actions')),
+        lastGhosts: last ? last.querySelectorAll('.dsh-rt-ghost').length : 0,
+        slotErrors: document.querySelectorAll('[data-slot-error]').length,
+      }
+    })
+    check('recall: NEW message after recall STILL has chips (core v0.4.40)', afterRecall.lastHasActions === true && afterRecall.lastGhosts === 2, JSON.stringify(afterRecall))
+    check('recall: no dead cells after the follow-up message', afterRecall.slotErrors === 0, JSON.stringify(afterRecall))
+  } catch (e) {
+    check('recall: section completed without exceptions', false, String(e).slice(0, 200))
+  }
+
+  // back to the base session for the layout checks, then clean up throwaways
+  if (baseSessionTitle !== null) { await clickSessionByTitle(baseSessionTitle); await p.waitForTimeout(4500) }
+  for (const t of (await listSessionTitles()).filter((x) => !sessionTitlesBefore.includes(x))) {
+    const r = await deleteSessionByTitle(t)
+    check(`recall: throwaway session cleaned up (${t})`, r === true, r === true ? undefined : String(r))
+  }
+  const leakedSessions = (await listSessionTitles()).filter((x) => !sessionTitlesBefore.includes(x))
+  check('recall: no throwaway session left behind', leakedSessions.length === 0, leakedSessions.join(', ') || 'no leftovers')
 
   // EDIT — chips stay parked (0.4.39); the editor card is a flow sibling that
   // must sit below the clock·copy row and stay clear of it.
@@ -175,7 +400,15 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   const disarmed = await p.evaluate(() => document.querySelectorAll('.dsh-rt-ghost-armed').length)
   check('armed: auto-disarm after 3s', disarmed === 0)
 
-  check('page: zero console/page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
+  // Environmental noise (transient resource 502s / another plugin's gateway
+  // poll) must not mask real page or plugin errors.
+  const NOISE = [
+    /^CONSOLE: Failed to load resource/,
+    /^CONSOLE: \[ui-cordis\] reading the Cordis inventory failed/,
+  ]
+  const hardErrors = errors.filter((e) => !NOISE.some((re) => re.test(e)))
+  check('page: zero console/page errors', hardErrors.length === 0,
+    hardErrors.slice(0, 3).join(' | ') || `${errors.length} benign resource-load message(s) filtered`)
 
   await b.close()
   const failed = results.filter((r) => !r.ok)
