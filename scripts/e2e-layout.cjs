@@ -119,6 +119,15 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     return m ? m[1] : null
   }).filter(Boolean))
 
+  // Title of the currently ACTIVE session row — the row the UI switched to
+  // after creating the throwaway session (precise identity for cleanup).
+  const activeSessionTitle = () => p.evaluate(() => {
+    const row = [...document.querySelectorAll('[class*="sessionRow"]')].find((el) => (el.className || '').toString().includes('selected'))
+    const btn = row && row.querySelector('button[aria-label*="的操作"]')
+    const m = btn && (btn.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
+    return m ? m[1] : null
+  })
+
   const clickSessionByTitle = (title) => p.evaluate((t) => {
     const btn = [...document.querySelectorAll('button[aria-label*="的操作"]')].find((b) => {
       const m = (b.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
@@ -216,6 +225,18 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     if (n > 0) break
     await p.waitForTimeout(1000)
   }
+  // render every session row the sidebar paginates away, so the pre-run title
+  // snapshot is complete (collapsed rows popping in later must not look "new")
+  for (let i = 0; i < 10; i++) {
+    const clicked = await p.evaluate(() => {
+      const btn = [...document.querySelectorAll('button')].find((b) => /^展开其余\s*\d+\s*个会话/.test((b.textContent || '').trim()) && b.offsetParent !== null)
+      if (!btn) return false
+      btn.click()
+      return true
+    })
+    if (!clicked) break
+    await p.waitForTimeout(300)
+  }
   const picked = []
   for (let k = 0; k < 6 && !found; k++) {
     await p.evaluate((k) => {
@@ -288,6 +309,7 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
   // hook mid-sequence (React #300) and the slot registration abdicated for the
   // rest of the page, so every later message lost its edit/recall chips.
   const sessionTitlesBefore = await listSessionTitles()
+  let recallTitle = null
   try {
     await p.evaluate(() => {
       const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('aria-label') || '') === '新建会话' && (b.className || '').includes('newSession'))
@@ -301,6 +323,8 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
       slotErrors: document.querySelectorAll('[data-slot-error]').length,
     }))
     check('recall: throwaway message has chips', seeded.seats === 1 && seeded.slotErrors === 0, JSON.stringify(seeded))
+    recallTitle = await activeSessionTitle()
+    console.log('  [recall] throwaway session title:', JSON.stringify(recallTitle))
 
     await p.evaluate(() => {
       const seats = [...document.querySelectorAll('[data-chat-flow-kind="user-actions"]')]
@@ -339,12 +363,14 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
 
   // back to the base session for the layout checks, then clean up throwaways
   if (baseSessionTitle !== null) { await clickSessionByTitle(baseSessionTitle); await p.waitForTimeout(4500) }
-  for (const t of (await listSessionTitles()).filter((x) => !sessionTitlesBefore.includes(x))) {
-    const r = await deleteSessionByTitle(t)
-    check(`recall: throwaway session cleaned up (${t})`, r === true, r === true ? undefined : String(r))
+  if (recallTitle !== null && !sessionTitlesBefore.includes(recallTitle)) {
+    const r = await deleteSessionByTitle(recallTitle)
+    check(`recall: throwaway session cleaned up (${recallTitle})`, r === true, r === true ? undefined : String(r))
+    const leftover = (await listSessionTitles()).includes(recallTitle)
+    check('recall: no throwaway session left behind', leftover === false, leftover ? recallTitle : 'no leftovers')
+  } else {
+    check('recall: throwaway session cleaned up', false, `could not identify the created session (title=${JSON.stringify(recallTitle)})`)
   }
-  const leakedSessions = (await listSessionTitles()).filter((x) => !sessionTitlesBefore.includes(x))
-  check('recall: no throwaway session left behind', leakedSessions.length === 0, leakedSessions.join(', ') || 'no leftovers')
 
   // EDIT — chips stay parked (0.4.39); the editor card is a flow sibling that
   // must sit below the clock·copy row and stay clear of it.
