@@ -9,9 +9,10 @@
 //           row (the 0.4.37 overlap regression), anchor released
 //   CANCEL  chips re-park inline
 //   RECALL  a REAL two-step recall in a throwaway session this script creates
-//           and deletes: the recalled entry must not abdicate, and the
-//           follow-up message must still get its chips (v0.4.40 regression —
-//           a mid-hook early return used to crash the seat with React #300)
+//           and then archives (v0.1.7 removed session delete): the recalled
+//           entry must not abdicate, and the follow-up message must still get
+//           its chips (v0.4.40 regression — a mid-hook early return used to
+//           crash the seat with React #300)
 //   ARMED   first recall click arms the chip (READ-ONLY: never a second click)
 //   HEAL    clobbering the row's transform self-heals via observer/interval
 // plus node --check + mirror-symbol parity on both lib files.
@@ -139,7 +140,10 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     return true
   }, title)
 
-  const deleteSessionByTitle = async (title) => {
+  // v0.1.7 removed the session-delete menu item (pin/rename/fork/archive only),
+  // so cleanup archives instead: archived rows leave the default list view,
+  // which is what the "left behind" checks below assert against.
+  const archiveSessionByTitle = async (title) => {
     const opened = await p.evaluate((t) => {
       const btn = [...document.querySelectorAll('button[aria-label*="的操作"]')].find((b) => {
         const m = (b.getAttribute('aria-label') || '').match(/会话[“"](.+)[”"]的操作/)
@@ -152,23 +156,21 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     if (opened !== 'MENU_OPEN') return opened
     await p.waitForTimeout(600)
     const item = await p.evaluate(() => {
-      const it = [...document.querySelectorAll('[role="menuitem"], button')].filter((n) => n.offsetParent !== null).find((n) => /^删除会话$/.test((n.textContent || '').trim()))
+      const it = [...document.querySelectorAll('[role="menuitem"], button')].filter((n) => n.offsetParent !== null).find((n) => /^归档会话$/.test((n.textContent || '').trim()))
       if (!it) return 'NO_ITEM'
       it.click()
-      return 'DELETE_ITEM'
+      return 'ARCHIVE_ITEM'
     })
-    if (item !== 'DELETE_ITEM') { await p.keyboard.press('Escape'); return item }
+    if (item !== 'ARCHIVE_ITEM') { await p.keyboard.press('Escape'); return item }
     await p.waitForTimeout(900)
-    const confirmed = await p.evaluate((t) => {
-      const d = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter((n) => n.offsetParent !== null)[0]
-      if (!d) return 'NO_DIALOG'
-      if (!(d.textContent || '').includes(t)) return 'TITLE_MISMATCH'
-      const btn = [...d.querySelectorAll('button')].find((b) => /^删除会话$/.test((b.textContent || '').trim()))
-      if (!btn) return 'NO_CONFIRM'
-      btn.click()
-      return 'CONFIRMED'
-    }, title)
-    if (confirmed !== 'CONFIRMED') { await p.keyboard.press('Escape'); return confirmed }
+    // An idle session archives directly; only running work raises the
+    // 停止并归档 confirmation dialog, so click through it when present.
+    await p.evaluate(() => {
+      const d = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].find((n) => n.offsetParent !== null)
+      if (!d) return
+      const btn = [...d.querySelectorAll('button')].find((b) => /^停止并归档$/.test((b.textContent || '').trim()))
+      if (btn) btn.click()
+    })
     for (let i = 0; i < 60; i++) {
       await p.waitForTimeout(1000)
       const still = await p.evaluate((t) => [...document.querySelectorAll('button[aria-label*="的操作"]')].some((b) => {
@@ -316,7 +318,7 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
       if (btn) btn.click()
     })
     await p.waitForTimeout(3000)
-    console.log('  [recall] send1:', await typeAndSend('撤回回归测试：只需回复「收到」，不要调用任何工具。'))
+    console.log('  [recall] send1:', await typeAndSend(`撤回回归测试 ${Date.now()}：只需回复「收到」，不要调用任何工具。`))
     await waitReplySettled('recall-msg1')
     const seeded = await p.evaluate(() => ({
       seats: document.querySelectorAll('[data-chat-flow-kind="user-actions"] .dsh-rt-user-row').length,
@@ -348,10 +350,28 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     const afterRecall = await p.evaluate(() => {
       const seats = [...document.querySelectorAll('[data-chat-flow-kind="user-actions"]')]
       const last = seats[seats.length - 1]
+      // Match each user message to its action seat by message id: the seat key
+      // is `<len>:retrace-actions<id>` and the user row key `<len>:input-message<id>`.
+      const userIds = [...document.querySelectorAll('[data-chat-flow-kind="user"]')]
+        .map((u) => (u.getAttribute('data-chat-anchor-key') || '').replace(/^\d+:input-message/, ''))
+      const seatIds = seats.map((s) => (s.getAttribute('data-chat-anchor-key') || '').replace(/^\d+:retrace-actions/, ''))
+      // Census of every flow row: which message actually survived the recall —
+      // the text tells msg1 ("测试") apart from msg2 ("测试乙"), and a steering
+      // or unknown row would explain a missing user row the ids alone cannot.
+      const census = [...document.querySelectorAll('[data-chat-flow-kind]')].map((el) => ({
+        kind: el.getAttribute('data-chat-flow-kind'),
+        id: (el.getAttribute('data-chat-anchor-key') || '').replace(/^\d+:[a-z-]+/, ''),
+        text: (el.textContent || '').replace(/\s+/g, ' ').slice(0, 36),
+      }))
       return {
         seats: seats.length,
+        seatIds,
+        userIds,
+        missingSeatFor: userIds.filter((id) => id && !seatIds.includes(id)),
+        census,
         lastHasActions: !!(last && last.querySelector('.dsh-rt-user-actions')),
         lastGhosts: last ? last.querySelectorAll('.dsh-rt-ghost').length : 0,
+        lastRowPresent: !!(last && last.querySelector('.dsh-rt-user-row')),
         slotErrors: document.querySelectorAll('[data-slot-error]').length,
       }
     })
@@ -361,15 +381,23 @@ const TOKEN = fs.readFileSync(WEB_LOG, 'utf8').match(/token=([^\s)]+)/g).slice(-
     check('recall: section completed without exceptions', false, String(e).slice(0, 200))
   }
 
-  // back to the base session for the layout checks, then clean up throwaways
+  // back to the base session for the layout checks, then clean up throwaways.
+  // The session title is rewritten by the async title-LLM mid-run (raw
+  // timestamped text → summary), so resolve the throwaway FRESH at cleanup
+  // time: exact recallTitle if still listed, else the 撤回回归测试 prefix not
+  // present in the pre-run snapshot (prior leftovers are excluded by that).
   if (baseSessionTitle !== null) { await clickSessionByTitle(baseSessionTitle); await p.waitForTimeout(4500) }
-  if (recallTitle !== null && !sessionTitlesBefore.includes(recallTitle)) {
-    const r = await deleteSessionByTitle(recallTitle)
-    check(`recall: throwaway session cleaned up (${recallTitle})`, r === true, r === true ? undefined : String(r))
-    const leftover = (await listSessionTitles()).includes(recallTitle)
-    check('recall: no throwaway session left behind', leftover === false, leftover ? recallTitle : 'no leftovers')
+  const isThrowaway = (t) => /^撤回回归测试/.test(t)
+  const currentTitles = await listSessionTitles()
+  const target = (recallTitle !== null && currentTitles.includes(recallTitle) && !sessionTitlesBefore.includes(recallTitle)
+    ? recallTitle : null) ?? currentTitles.find((t) => isThrowaway(t) && !sessionTitlesBefore.includes(t)) ?? null
+  if (target !== null) {
+    const r = await archiveSessionByTitle(target)
+    check(`recall: throwaway session archived (${target})`, r === true, r === true ? undefined : String(r))
+    const leftovers = (await listSessionTitles()).filter((t) => isThrowaway(t) && !sessionTitlesBefore.includes(t))
+    check('recall: no throwaway session left behind', leftovers.length === 0, leftovers.length === 0 ? 'no leftovers' : leftovers.join(' | '))
   } else {
-    check('recall: throwaway session cleaned up', false, `could not identify the created session (title=${JSON.stringify(recallTitle)})`)
+    check('recall: throwaway session cleaned up', false, `could not identify the created session (recallTitle=${JSON.stringify(recallTitle)}, throwawayTitles=${JSON.stringify(currentTitles.filter(isThrowaway))})`)
   }
 
   // EDIT — chips stay parked (0.4.39); the editor card is a flow sibling that

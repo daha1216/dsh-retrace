@@ -31,7 +31,7 @@ better-display 已于 2026-09-14 从 web profile 卸载（用户不要独立阅�
 
 ## 4. 部署闭环（注意 profile 钉了 commit）
 
-**当前版本**：v0.4.40。profile（`C:/Users/daha/.dsh/profiles/web/package.json`）里钉的是
+**当前版本**：v0.4.43。profile（`C:/Users/daha/.dsh/profiles/web/package.json`）里钉的是
 `"dsh-retrace": "github:daha1216/dsh-retrace#<commit>"`（hash 随部署更新，以 profile 实况为准）。
 
 **改完视觉样式后的最小验证闭环**（每步都别跳，缺一步就可能在旧代码上白验）：
@@ -63,4 +63,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/daha/.dsh/launch-de
 - 拉 GitHub 必须带代理：`HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890`。
 - 停服/重启脚本路径：`C:/Users/daha/.dsh/stop-dsh-web.ps1`、`C:/Users/daha/.dsh/launch-deepseek-harness.ps1 -NoOpen`。
 - E2E 习惯：role 定位器在本应用常超时，用 `tab.playwright.evaluate()` + `dispatchEvent(new MouseEvent("click",{bubbles:true}))`；输入框用 React 原生 value setter + `input` 事件。
-- 撤回是重操作：E2E 请在一次性测试会话里做，完事删除会话。
+- 撤回是重操作：E2E 请在一次性测试会话里做，完事归档会话（0.1.7 起核心会话菜单无「删除会话」项，脚本已按 `撤回回归测试` 前缀自动归档；磁盘残留随后续停服窗口清理）。
