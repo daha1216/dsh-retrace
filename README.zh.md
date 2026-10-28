@@ -5,7 +5,7 @@
 **撤回 · 编辑重发 · 重新生成**，加上**写安全**的会话版本化 —— DeepSeek Harness 的
 **Agent 业务层（生产级保证）** 实现。
 
-[![Version](https://img.shields.io/badge/version-0.4.78-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
+[![Version](https://img.shields.io/badge/version-0.4.79-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/daha1216/dsh-retrace/blob/main/LICENSE)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-4A90D9)](https://github.com/topics/dsh-plugin)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/daha1216/dsh-retrace/pulls)
@@ -15,7 +15,7 @@
 </div>
 
 > 本仓库是 [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace) 的个人兼容修复
-> Fork（维护者 daha1216），当前版本 **0.4.78**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
+> Fork（维护者 daha1216），当前版本 **0.4.79**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
 > 「更新记录」；安装请从本 Fork 的 GitHub 直装（详见安装章节）。
 
 **撤回 / 编辑重发 / 重新生成** —— 每个会话都该有的三个操作。但回退不只是「撤掉一条
@@ -32,7 +32,7 @@
 > 需要带 `dsh` CLI 的 DeepSeek Harness；装完**重启 DSH** 生效（运行中的应用不会热加载）。
 
 ```sh
-# 推荐：从本 Fork 的 GitHub 直装（含 0.4.50–0.4.78 修复）
+# 推荐：从本 Fork 的 GitHub 直装（含 0.4.50–0.4.79 修复）
 dsh plugin --profile desktop add github:daha1216/dsh-retrace   # DSH 桌面版
 # 或 Web 部署：dsh plugin --profile web add github:daha1216/dsh-retrace
 # 或从 ZIP 解压后：dsh plugin --profile desktop add ~/plugins/dsh-retrace
@@ -69,7 +69,7 @@ dsh plugin --profile desktop add github:daha1216/dsh-retrace   # DSH 桌面版
 | | 能力 | 说明 |
 |---|---|---|
 | 🕘 | **时间线** | 「版本」Tab（与官方「对话/轨迹」平级）：每个版本的类型/时间/消息数/文件变更徽标，经 `session/projection` 推送帧实时更新（零轮询），大列表窗口化 |
-| ↩️ | **产物回退** | 仅对话 / 仅产物 / 两者，先干跑预览再执行；git 优先 + 内容寻址快照兜底；回退本身是新版本（`restore`），可以再回退 |
+| ↩️ | **产物回退** | 仅对话 / 仅产物 / 两者，先干跑预览再执行；边界已提交时用 git，否则用内容寻址快照；回退本身是新版本（`restore`），可以再回退 |
 | 🧭 | **跳转对话** | 从时间线一键跳转到对应位置（自动翻页加载更早历史 + 锚点高亮） |
 | 🧹 | **存储有界** | 快照只保留最近 N 个版本（默认 50，可在设置里 1–1000 调整）；后台扫掠串行回收被截断版本，10 分钟内新写入的对象不参与回收，进程重启也不会误删其它会话的快照 |
 
@@ -93,7 +93,7 @@ dsh plugin --profile <name> add github:daha1216/dsh-retrace
 ```
 
 > 注意：`add dsh-retrace`（不带 GitHub 前缀）会从 npm 装到**上游版本**，不包含本 Fork
-> 的 0.4.50–0.4.78 修复。请始终用上面的 GitHub 形式安装。
+> 的 0.4.50–0.4.79 修复。请始终用上面的 GitHub 形式安装。
 
 > ⚠️ **安装后需要重启。** 安装会写入新文件并重新生成 profile 组合，但运行中的应用
 > **不会**热加载 bundle —— 请**退出并重新打开 DSH Desktop**（独立 Web 部署则重启
@@ -179,8 +179,9 @@ Client 半区会依据包内 `dsh.client` 元数据被自动打包进 Web 客户
 
 ---
 
-## 🔄 更新记录（0.4.50 → 0.4.78）
+## 🔄 更新记录（0.4.50 → 0.4.79）
 
+- **0.4.79** —— 对抗式审计加固：请求闸门现在同时校验 socket 对端（伪造 `Host` 头不再能打开仅限环回的只读路由），剥离调用方自带的 span，5xx 内部信息脱敏，会话 ID / 产物 sha / 模型推导路径全部校验并限长，快照读取加上限；undo 与 restore 重新校验工作区 realpath 与文件版本，git 回退对「窗口内新建 / 脏工作树捕获」的文件回退到内容快照；折叠 marker 补上缺失的「展开」控件，`git/init` 写入操作日志，损坏的 `capture-epoch.json` 改从文件 mtime 恢复而不是前移 epoch（前移会让所有已有快照失效）。
 - **0.4.78** —— 合并了两份外部贡献的修复，并补齐 `DSH_HOME` 的路径处理：`regenerate` 在窗口化日志下改用 `eventAt` 取行（原来按裸下标取到相邻行，会把别人的文本当 prompt 重发）；`capture-epoch.json` 改为原子写、截断的 marker 用正则抢救而不是把 epoch 前移（前移会让所有已有快照静默失效）；中断守卫改为按 turn 号记账（「崩溃→恢复→再崩溃」原来一条都不报），并改读宿主的 `snapshotEvents()`（原来读 `session.events`，在真实会话上恒为空）；会话文件查找改为跟随 `DSH_HOME`。
 - **0.4.77** —— 旧短码前缀改为「会话一加载就清理」，不再只依赖启动时的一次扫描，启动之后才打开的会话也能覆盖。
 - **0.4.76** —— 启动之后才打开的会话也会被清理旧短码前缀：插件的每次请求都会上报它触碰的会话，清理对每个会话只跑一次。
@@ -265,7 +266,7 @@ Client 半区会依据包内 `dsh.client` 元数据被自动打包进 Web 客户
   拒绝自己的 marker）；日志是窗口（分叉或压缩后）的会话在计算区间时不再取错事件行；
   `waterLevel` 与轮次/区间边界辅助共用同一套信封处理。启动时会探测运行中的宿主是否
   提供 `Session.prototype.snapshotEvents`，契约不明则进入只读模式（写操作返回
-  `host-contract-unsupported`），并通过 `GET /api/plugins/retrace/capabilities` 如实
+  `capability-disabled`，HTTP 503），并通过 `GET /api/plugins/retrace/capabilities` 如实
   上报，而不是猜测兼容。
 - **0.4.56** —— 安全止损：产物回退与自动 GC 默认关闭。审计确认边界期快照、快照回写与
   自动清理在当前宿主契约下无法证明安全，因此本版把它们做成宿主侧能力门控
@@ -364,10 +365,10 @@ Client 半区会依据包内 `dsh.client` 元数据被自动打包进 Web 客户
 
 ## 🗺️ 路线图
 
-**当前已具备（0.4.54）：**
+**当前已具备（0.4.79）：**
 
 - 撤回 / 编辑重发 / 重新生成——每次回退都过**三层写前校验**与安全编辑路径（自动停 agent、临时 step 包裹 marker），**不会损坏日志、不会破坏 /compact**。
-- 单会话**版本时间线** + **产物回退**（git 优先 + 快照兜底、干跑预览、跳转对话、dirty 工作区拒绝覆盖）。
+- 单会话**版本时间线** + **产物回退**（git/快照按边界事实择一、干跑预览、跳转对话、dirty 工作区拒绝覆盖）。
 - 对话视图内的**分叉图** + **会话谱系**。
 - **看门狗**（默认关闭，`DSH_RETRACE_WATCHDOG=1` 开启）——并发写入第一时间快照日志。
 - 配套 **`dsh-log-contract`**：30+ 条离线契约规则 + 原地修复（`fix --neutralize` / `--clip-crossstep`），能处理会让 /compact 永久失败的会话。
@@ -395,8 +396,9 @@ scripts/e2e-layout.cjs # 布局 E2E（需外部安装 playwright）
 cordis.patch.yml       # dsh.bundle profile patch 层
 ```
 
-- `scripts/build-client.mjs`、`scripts/generate-dynamic.mjs`、`test/` 与 CI workflow
-  **不在**本仓库中——请勿执行 `pnpm build` / `pnpm test`。
+- `scripts/build-client.mjs`、`scripts/check-syntax.mjs` 与 `test/` **在**本仓库中，
+  直接用 `node` 运行（没有 `node_modules`，勿执行 `pnpm install` / `pnpm build`）；
+  CI workflow 不在本仓库。
 - 修改客户端必须同时改 `lib/client.js` 与 `lib/client.bundle.js`，两者都要通过
   `node --check`。
 - 语法检查：`node scripts/check-syntax.mjs`（全部 `lib/**/*.js` 逐个 `node --check`，不再有例外）。

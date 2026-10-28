@@ -1,7 +1,7 @@
 # 🧭 dsh-retrace
 
 > A session time machine for DeepSeek Harness — a personal compatibility-fix fork of
-> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.78**.
+> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.79**.
 
 Recall a whole turn, edit-and-resend a past prompt, or regenerate a reply — while the
 conversation state and the workspace files it touched are versioned together. Every rollback
@@ -41,14 +41,24 @@ hot-load bundles. If `dsh` is not on your PATH, prefix the command with
 - **🕘 Version timeline** — every rollback becomes a version (kind / time / message count /
   file changes), pushed live via `session/projection`.
 - **↩️ Artifact rollback** — conversation only, files only, or both, with a dry-run preview;
-  git first, content-addressed snapshots as fallback; a rollback is itself a new version.
+  git when the boundary recorded the exact committed bytes, content-addressed snapshots
+  otherwise; a rollback is itself a new version.
 - **🧭 Fork map & lineage** — visualize branch points and parent-session lineage.
 - **🗂️ Session archaeology CLI** — read-only index / query / extract / file-history over
   persisted session logs.
 
 ---
 
-## 🔄 Recent changes (0.4.50 → 0.4.78)
+## 🔄 Recent changes (0.4.50 → 0.4.79)
+
+- **0.4.79** — adversarial-audit hardening pass. The request gate now checks the socket peer as
+  well as the `Host` header (a forged header no longer opens the loopback-only route), caller-supplied
+  spans are stripped, internal 5xx messages are redacted, session ids / artifact shas / model-derived
+  paths are validated and bounded, and snapshot reads are size-capped. Undo and restore re-check the
+  workspace realpath and the file version, and git rollback falls back to content snapshots for files
+  created in the window or captured from a dirty tree. Fold markers gained their missing *Expand*
+  control, `git/init` is written to the operations log, and a corrupted `capture-epoch.json` recovers
+  from the file mtime instead of advancing the epoch (which invalidated every existing snapshot).
 
 - **0.4.78** — two contributor fixes landed, plus the paths the plugin derives from `DSH_HOME`:
   `regenerate` now reads windowed logs through `eventAt` (a bare index picked the neighbouring row,
@@ -178,7 +188,7 @@ titles that older builds prefixed with `[badge]` are cleaned back to the text th
   computing a span; `waterLevel` and the round/range boundary helpers share the
   same envelope handling. At startup the plugin probes the running host for
   `Session.prototype.snapshotEvents`; if the contract is not recognised it runs
-  read-only (edits answer `host-contract-unsupported`) and reports that through
+  read-only (edits answer `capability-disabled`, HTTP 503) and reports that through
   `GET /api/plugins/retrace/capabilities`, instead of guessing compatibility.
 - **0.4.56** — safety stop-loss: artifact rollback and automatic GC now ship disabled.
   The audit could not prove boundary-time capture, snapshot write-back or the automatic
@@ -276,8 +286,9 @@ lib/adapter/           # DSH session-log adapter + marker writer
 scripts/e2e-layout.cjs # layout E2E (needs an external playwright install)
 ```
 
-- `scripts/build-client.mjs`, `scripts/generate-dynamic.mjs`, `test/` and CI workflows are
-  **not** part of this fork — don't run `pnpm build` / `pnpm test`.
+- `scripts/build-client.mjs`, `scripts/check-syntax.mjs` and `test/` are part of the
+  checkout; run them with plain `node` (there is no `node_modules` — don't run
+  `pnpm install` / `pnpm build`).
 - Client changes must be made in **both** `lib/client.js` and `lib/client.bundle.js`, and both
   must pass `node --check`.
 - The dynamic-plugin entry points (`lib/dynamic-*.js` and their `exports`) were removed in

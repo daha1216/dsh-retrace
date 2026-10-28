@@ -11,7 +11,7 @@
  * 运行：node --test test/
  */
 import assert from 'node:assert/strict'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -53,11 +53,16 @@ test('截断的 marker 会被抢救，epoch 不前移', async (t) => {
   })
 })
 
-test('完全无法解析的 marker 才会重建，并留下现场副本', async (t) => {
+test('完全无法解析的 marker 用 mtime 重建（不跳到 now），并留下现场副本', async (t) => {
   const root = await makeRoot(t)
-  await writeFile(EPOCH_FILE(root), 'not json at all')
+  const file = EPOCH_FILE(root)
+  await writeFile(file, 'not json at all')
+  // The only recoverable signal is when the marker was last written; jumping to
+  // now() would invalidate every snapshot captured before this boot.
+  const knownMtime = new Date(1_700_000_000_000)
+  await utimes(file, knownMtime, knownMtime)
   const epoch = await loadCaptureEpoch(root, { now: () => 4242 })
-  assert.equal(epoch, 4242)
+  assert.equal(epoch, 1_700_000_000_000)
   const entries = await readdir(root)
   assert.ok(
     entries.some((name) => name.startsWith(`${CAPTURE_EPOCH_FILE}.damaged-`)),
