@@ -14,6 +14,20 @@
 `log[seq - baseSeq]` 索引，`events[seq]` 只对 baseSeq=0 成立），并导出现在宿主自己的
 `foldSurface`。新增读取方一律走它，不要自己 `event.data.message?.id` 或 `events[seq]`。
 
+**读契约依赖上游已弃用的同步事件读接口**（0.4.81 起记录）：宿主 `@deepseek-ai/dsh-session`
+的 `Session.eventAt()` / `Session.snapshotEvents()` / `Session.ownEvents()` 三件 reader 都标了
+`@deprecated`，上游架构决策记录（`deepseek-harness/.agents/notes/implemented/architecture/2026-09-09-deprecate-synchronous-session-event-reads.md`）
+的措辞是「Existing logic may remain unmigrated for now, but **new calls are prohibited**.
+New aliases or wrappers that expose the same synchronous historical access are prohibited as well.」
+本仓库的整条读路径建在这三件上，`lib/host-core.js` 的 `sessionEvents()` 就是被上游点名
+禁止的那种包装器——但它是**唯一**出口，有意保留：多一层包装就多一处要改。
+
+现在无法迁移，因为上游**还没有异步替代接口**：`dsh-session` 的导出面里没有
+`readEvents` / `eventsAsync`，全包唯一的 `async` 是 `SessionStore.flush(session)`。
+上游落地前的约束是**只减不增**，由 `test/deprecated-event-readers.test.mjs` 按文件
+计数强制执行：新增 `sessionEvents(` 调用点会让测试失败，删掉调用点要把那个上限调小，
+不要直接把数字改大。`lib/adapter/normalize.js` 的既有导出口不算新调用点。
+
 **产物存储的键一律带会话 ID**（0.4.58 起）：引用是 `<sessionId>|<versionId>|<path>`，
 git 事实键是 `<sessionId>|<versionId>`，构造函数 `refFor()` / `versionKey()` 在
 `lib/artifact-store.js`。版本号是会话内序号，脱离会话就不唯一；没有会话 ID 的旧行
@@ -67,7 +81,7 @@ better-display 已于 2026-09-14 从 web profile 卸载（用户不要独立阅�
 
 ## 4. 部署闭环（注意 profile 钉了 commit）
 
-**当前版本**：v0.4.80。profile（`C:/Users/daha/.dsh/profiles/desktop/package.json`）里钉的是
+**当前版本**：v0.4.81。profile（`C:/Users/daha/.dsh/profiles/desktop/package.json`）里钉的是
 `"dsh-retrace": "github:daha1216/dsh-retrace#<commit>"`（hash 随部署更新，以 profile 实况为准）。
 
 **改完视觉样式后的最小验证闭环**（每步都别跳，缺一步就可能在旧代码上白验）：

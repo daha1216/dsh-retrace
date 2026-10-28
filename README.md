@@ -1,7 +1,7 @@
 # 🧭 dsh-retrace
 
 > A session time machine for DeepSeek Harness — a personal compatibility-fix fork of
-> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.80**.
+> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.81**.
 
 Recall a whole turn, edit-and-resend a past prompt, or regenerate a reply — while the
 conversation state and the workspace files it touched are versioned together. Every rollback
@@ -49,7 +49,16 @@ hot-load bundles. If `dsh` is not on your PATH, prefix the command with
 
 ---
 
-## 🔄 Recent changes (0.4.50 → 0.4.80)
+## 🔄 Recent changes (0.4.50 → 0.4.81)
+
+- **0.4.81** — pin the deprecated synchronous session readers so no new call sites appear.
+  Upstream marks `Session.eventAt()` / `snapshotEvents()` / `ownEvents()` as deprecated and
+  prohibits new calls *and* new wrappers around them; this repo's whole read path sits on them
+  (its single `sessionEvents()` exit is exactly the wrapper upstream forbids keeping). There is
+  no async replacement interface upstream yet — `dsh-session` exports no `readEvents` /
+  `eventsAsync`, its only `async` member is `SessionStore.flush` — so migration has to wait.
+  `test/deprecated-event-readers.test.mjs` now fails on any *added* call site per file, and
+  `AGENTS.md` records the constraint and the reason no migration is possible today.
 
 - **0.4.80** — bump `dsh-log-contract` to `^0.3.29`. Contract releases before 0.3.26 do not
   know session format v4, so `validateSessionLog` reported H2 (unknown `header.version`) and

@@ -5,7 +5,7 @@
 **撤回 · 编辑重发 · 重新生成**，加上**写安全**的会话版本化 —— DeepSeek Harness 的
 **Agent 业务层（生产级保证）** 实现。
 
-[![Version](https://img.shields.io/badge/version-0.4.80-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
+[![Version](https://img.shields.io/badge/version-0.4.81-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/daha1216/dsh-retrace/blob/main/LICENSE)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-4A90D9)](https://github.com/topics/dsh-plugin)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/daha1216/dsh-retrace/pulls)
@@ -15,7 +15,7 @@
 </div>
 
 > 本仓库是 [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace) 的个人兼容修复
-> Fork（维护者 daha1216），当前版本 **0.4.80**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
+> Fork（维护者 daha1216），当前版本 **0.4.81**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
 > 「更新记录」；安装请从本 Fork 的 GitHub 直装（详见安装章节）。
 
 **撤回 / 编辑重发 / 重新生成** —— 每个会话都该有的三个操作。但回退不只是「撤掉一条
@@ -179,7 +179,16 @@ Client 半区会依据包内 `dsh.client` 元数据被自动打包进 Web 客户
 
 ---
 
-## 🔄 更新记录（0.4.50 → 0.4.80）
+## 🔄 更新记录（0.4.50 → 0.4.81）
+
+- **0.4.81** — 把已弃用的同步事件读接口钉住，不许再新增调用点。上游已把
+  `Session.eventAt()` / `snapshotEvents()` / `ownEvents()` 标为 deprecated，并明令
+  「new calls are prohibited」，连「新别名 / 包装器」也一并禁止——而本仓库整条读路径都建在
+  这三件上（唯一的 `sessionEvents()` 出口正好就是上游禁止保留的那种包装器）。上游目前**还
+  没有异步替代接口**：`dsh-session` 的导出面里没有 `readEvents` / `eventsAsync`，全包唯一的
+  `async` 成员是 `SessionStore.flush`，所以迁移只能等上游落地。
+  `test/deprecated-event-readers.test.mjs` 现在按文件计数，任何**新增**调用点都会让测试失败；
+  `AGENTS.md` 记录这条约束以及「今天为什么迁不了」。
 
 - **0.4.80** — `dsh-log-contract` 升到 `^0.3.29`。0.3.26 以前的契约版本不认识会话格式 v4，
   会对每一份健康 v4 会话报 H2（`header.version` 未知）与 E9（v4 的 `system/message` 形状），
