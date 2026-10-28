@@ -1,7 +1,7 @@
 # 🧭 dsh-retrace
 
 > A session time machine for DeepSeek Harness — a personal compatibility-fix fork of
-> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.79**.
+> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.80**.
 
 Recall a whole turn, edit-and-resend a past prompt, or regenerate a reply — while the
 conversation state and the workspace files it touched are versioned together. Every rollback
@@ -49,7 +49,12 @@ hot-load bundles. If `dsh` is not on your PATH, prefix the command with
 
 ---
 
-## 🔄 Recent changes (0.4.50 → 0.4.79)
+## 🔄 Recent changes (0.4.50 → 0.4.80)
+
+- **0.4.80** — bump `dsh-log-contract` to `^0.3.29`. Contract releases before 0.3.26 do not
+  know session format v4, so `validateSessionLog` reported H2 (unknown `header.version`) and
+  E9 (v4 `system/message` shape) on every healthy v4 session. Measured on 60 local v4 logs:
+  0.3.17 → 0/60 clean (H2×120, E9×63); 0.3.29 → 60/60 clean.
 
 - **0.4.79** — adversarial-audit hardening pass. The request gate now checks the socket peer as
   well as the `Host` header (a forged header no longer opens the loopback-only route), caller-supplied
