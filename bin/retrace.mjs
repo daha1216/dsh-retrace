@@ -44,7 +44,7 @@ const USAGE = `dsh-retrace 考古 CLI —— 会话日志数据/审计资产挖�
   retrace lineage <session> [--json]
   retrace store inventory [--verify-hashes] [--json]
   retrace store gc [--apply --yes] [--json]
-  retrace store migrate [--apply --yes] [--json]`;
+  retrace store migrate [--apply --yes] [--force] [--json]`;
 
 function fail(msg) {
   process.stderr.write(`❌ ${msg}\n\n${USAGE}\n`);
@@ -165,8 +165,17 @@ async function main() {
       } else if (sub === 'migrate') {
         const apply = rest.includes('--apply');
         const yes = rest.includes('--yes');
+        const force = rest.includes('--force');
         if (apply && !yes) fail('store migrate --apply 需要同时给 --yes（确认改写 domain 文件）');
-        const result = migrate({ domainFile, root, apply });
+        let result;
+        try {
+          result = migrate({ domainFile, root, apply, force });
+        } catch (error) {
+          if (error?.code === 'store-in-use') {
+            fail(`拒绝改写：${error.message}\n   先停 dsh web，确认没有宿主在跑；确实要在线改再加 --force`);
+          }
+          throw error;
+        }
         if (json) return process.stdout.write(JSON.stringify({ root, domainFile, ...result }, null, 2) + '\n');
         process.stdout.write(`🧾 retrace store migrate —— ${root}（${result.mode}）\n`);
         process.stdout.write(`   legacy 引用 ${result.frozen.legacyRefs} 条 / 涉及对象 ${result.frozen.objectsKept} 个（冻结保留）\n`);

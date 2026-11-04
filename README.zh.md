@@ -5,7 +5,7 @@
 **撤回 · 编辑重发 · 重新生成**，加上**写安全**的会话版本化 —— DeepSeek Harness 的
 **Agent 业务层（生产级保证）** 实现。
 
-[![Version](https://img.shields.io/badge/version-0.4.81-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
+[![Version](https://img.shields.io/badge/version-0.4.82-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/daha1216/dsh-retrace/blob/main/LICENSE)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-4A90D9)](https://github.com/topics/dsh-plugin)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/daha1216/dsh-retrace/pulls)
@@ -15,7 +15,7 @@
 </div>
 
 > 本仓库是 [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace) 的个人兼容修复
-> Fork（维护者 daha1216），当前版本 **0.4.81**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
+> Fork（维护者 daha1216），当前版本 **0.4.82**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
 > 「更新记录」；安装请从本 Fork 的 GitHub 直装（详见安装章节）。
 
 **撤回 / 编辑重发 / 重新生成** —— 每个会话都该有的三个操作。但回退不只是「撤掉一条
@@ -179,7 +179,19 @@ Client 半区会依据包内 `dsh.client` 元数据被自动打包进 Web 客户
 
 ---
 
-## 🔄 更新记录（0.4.50 → 0.4.81）
+## 🔄 更新记录（0.4.50 → 0.4.82）
+
+- **0.4.82** — 把请求作用域与原始输入的加固移植到 0.4.81 线上。`x-retrace-config` 改为
+  经 `AsyncLocalStorage` 的请求级配置，不再是按会话粘住的 Map：合法请求头不会再泄漏到后续
+  缺失/非法请求，局部头部也不再继承旧字段；`prewrite` 重新变成宿主专属（此前可由请求头设置，
+  等于让客户端关掉 marker 安全闸门）。`handleSnapshot` 改为 fail-closed：缺 sessions 服务返回
+  503 `sessions-unavailable`，未知会话返回 404 `session-not-found`，两条路径都不触碰快照存储。
+  fold 端点经共享的 `isFoldRange` 要求原始安全整数 `start`/`end`（且 `end >= start`）；
+  此前 `Number()` 会把 `null`/`''`/`false` 变成 0、`true` 变成 1，从而折叠首个节点。
+  `store-cli` 改用 UUID 临时名 + `wx` 独占打开，rename 前 fsync、rename 后 fsync 父目录，
+  提交已落地但目录同步失败时报 `store-commit-uncertain`。`git-adapter` 改读 `ls-tree -z`
+  （含换行的路径不再解析错位），`artifact-store.read` 遵守 `maxBytes`，客户端只在回显真正
+  落进输入框时才恢复被撤回的图片。
 
 - **0.4.81** — 把已弃用的同步事件读接口钉住，不许再新增调用点。上游已把
   `Session.eventAt()` / `snapshotEvents()` / `ownEvents()` 标为 deprecated，并明令

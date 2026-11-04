@@ -1,7 +1,7 @@
 # 🧭 dsh-retrace
 
 > A session time machine for DeepSeek Harness — a personal compatibility-fix fork of
-> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.81**.
+> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.82**.
 
 Recall a whole turn, edit-and-resend a past prompt, or regenerate a reply — while the
 conversation state and the workspace files it touched are versioned together. Every rollback
@@ -49,7 +49,22 @@ hot-load bundles. If `dsh` is not on your PATH, prefix the command with
 
 ---
 
-## 🔄 Recent changes (0.4.50 → 0.4.81)
+## 🔄 Recent changes (0.4.50 → 0.4.82)
+
+- **0.4.82** — port the request-scope and raw-input hardening onto the 0.4.81 line.
+  `x-retrace-config` is now request-scoped through `AsyncLocalStorage` instead of a sticky
+  per-session map, so a valid header can no longer leak into later missing/malformed requests
+  and a partial header no longer inherits stale fields; `prewrite` is host-only again (it was
+  request-settable, which let a client disable the marker guard). `handleSnapshot` fails closed:
+  no sessions service → 503 `sessions-unavailable`, unknown session → 404 `session-not-found`,
+  and neither touches the snapshot store. Fold endpoints require raw safe-integer
+  `start`/`end` (with `end >= start`) through a shared `isFoldRange`; `Number()` previously
+  coerced `null`/`''`/`false` to 0 and `true` to 1, folding the first node. `store-cli` writes
+  through a UUID temp file opened `wx`, fsyncs before rename, fsyncs the parent directory
+  after, and reports `store-commit-uncertain` when the commit landed but the directory sync
+  failed. `git-adapter` reads `ls-tree -z` (a path with a newline no longer breaks the parse),
+  `artifact-store.read` honours `maxBytes`, and the client only restores recalled images when
+  the text actually landed in the composer.
 
 - **0.4.81** — pin the deprecated synchronous session readers so no new call sites appear.
   Upstream marks `Session.eventAt()` / `snapshotEvents()` / `ownEvents()` as deprecated and
