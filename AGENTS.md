@@ -86,6 +86,12 @@ better-display 已于 2026-09-14 从 web profile 卸载（用户不要独立阅�
 
 **改完视觉样式后的最小验证闭环**（每步都别跳，缺一步就可能在旧代码上白验）：
 
+> **本机实况（2026-11-05 核对）**：本机没有全局 `dsh` CLI，也没有
+> `stop-dsh-web.ps1` / `launch-deepseek-harness.ps1`（历史上的 add/停/启三步走不通）。
+> 宿主是 Electron 桌面端：主进程 `DeepSeek Harness.exe`，服务进程跑
+> `dsh-desktop-host/lib/index.js`，插件从 profile `node_modules` 加载。部署 =
+> 文件级同步 + 重启宿主进程。
+
 ```sh
 # 1) 双文件同步改完，各自过语法
 node --check lib/client.js && node --check lib/client.bundle.js
@@ -95,22 +101,55 @@ node --check lib/client.js && node --check lib/client.bundle.js
 #    / observer 400ms 内自愈（过滤器不误杀相关 mutation）/ armed 两步确认只读验证
 #    / 双文件符号镜像一致 / 零控制台错误
 node scripts/e2e-layout.cjs
-# 3) bump package.json version
-# 4) commit + push origin main
-# 5) 停服务
-powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/daha/.dsh/stop-dsh-web.ps1
-# 6) 重新钉 add 到新 hash（spec 钉死，update 不会前进！）
-cd C:/Users/daha/.dsh && HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890 dsh plugin --profile web add github:daha1216/dsh-retrace#<新hash>
-# 7) 重启
-powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/daha/.dsh/launch-deepseek-harness.ps1 -NoOpen
+# 3) bump package.json version + AGENTS.md 本行的「当前版本」锚点 + README 双语版本
+# 4) commit + push origin main；发布另打注释 tag（vX.Y.Z）+ GitHub Release
 ```
 
-8. 浏览器**硬刷新**旧标签页（Ctrl+Shift+R）——插件 bundle 走 `rev` 缓存，普通刷新/F5 可能仍拿旧代码。
-9. 验证部署真的生效：控制台执行 `document.querySelector('style[data-plugin-css="dsh-retrace-css"]')`，应非 null（**该 style 没有 id**，别用 `#dsh-retrace-css`）。
+5. **文件级同步到 profile**（`pnpm add` 会被运行中的 Electron 占用 node_modules 而失败
+   `os error 5`，别硬试）：
+
+```sh
+DEPLOY="C:/Users/daha/.dsh/profiles/desktop/node_modules/dsh-retrace"
+rm -rf "$DEPLOY/lib" "$DEPLOY/bin"
+cp -r lib "$DEPLOY/lib" && cp -r bin "$DEPLOY/bin"
+cp package.json cordis.patch.yml README.md README.zh.md "$DEPLOY/"
+# 校验：与 commit blob 逐字节比对（工作树可能是 CRLF，别用 diff -rq 直接比，会误报行尾噪声）
+git show HEAD:lib/http.js | sha256sum; sha256sum "$DEPLOY/lib/http.js"   # 两者应一致
+grep -m1 '"version"' "$DEPLOY/package.json"                              # 应显示新版本
+```
+
+6. **更新 profile 钉**（spec 钉死 commit，不改就永远装旧版）：编辑
+   `C:/Users/daha/.dsh/profiles/desktop/package.json` 的
+   `"dsh-retrace": "github:daha1216/dsh-retrace#<新hash>"`，并同步
+   `pnpm-lock.yaml`（可在 profile 目录用自带 pnpm 跑
+   `node <runtime>/dependencies/node/bin/node.exe <runtime>/dependencies/pnpm/bin/pnpm.cjs add github:daha1216/dsh-retrace#<新hash> --lockfile-only`，
+   带 `HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890`；
+   只写 lockfile 不动 node_modules，避免占用冲突）。
+
+7. **重启宿主让新代码进内存**（Node ESM 有模块缓存，文件换了进程不重启等于没部署）：
+   服务进程是 Electron 主进程的子进程，杀掉它 Electron 会自动重新拉起（端口会变，
+   以 GUI 新端口为准）。等价做法：退出 DeepSeek Harness 桌面端再重开。会话内无法
+   「重启后继续汇报」——服务进程一死本轮对话即断，重启交给分离脚本或用户。
+
+8. **验证部署真的生效**（对运行中的服务进程做行为探测，别只看文件）：
+
+```sh
+# 0.4.82 起的判定性探针：raw fold 端点必须先校验再查会话。
+# 新代码 → {"error":{"code":"bad-fold-range",...}}；旧代码 → session-not-found。
+curl -s -X POST -H "Content-Type: application/json" -H "x-retrace-client: web" \
+  -d '{"sessionId":"probe","start":null,"end":null}' \
+  "http://127.0.0.1:<新端口>/api/plugins/retrace/fold"
+```
+
+9. 浏览器**硬刷新**旧标签页（Ctrl+Shift+R）——插件 bundle 走 `rev` 缓存，普通刷新/F5 可能仍拿旧代码。
 10. 在「对话」tab 验证 chips/编辑器/报错视觉。
 
-- **为什么用 add 不用 update**：profile 把 spec 钉在 `#<commit>`，`dsh plugin update` 解析的是同一个钉死 commit，不会前进；必须重新 `add` 指到新 hash。
+- **为什么不能只 `pnpm add`**：Electron 运行中锁着 node_modules（`ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR`）；
+  就算 `--lockfile-only` 成功，node_modules 里还是旧文件，必须文件级同步 + 重启。
+- **pnpm 陷阱**：在 profile 跑 `pnpm add` 若中途失败，可能把 `@dsh-ops/bash-win32-x64`
+  改名成 `bash-win32-x64_old_purge` 不换回（工具链 bash 消失）。恢复：目录名改回去。
 - 拉 GitHub 必须带代理：`HTTP_PROXY=http://127.0.0.1:7890 HTTPS_PROXY=http://127.0.0.1:7890`。
-- 停服/重启脚本路径：`C:/Users/daha/.dsh/stop-dsh-web.ps1`、`C:/Users/daha/.dsh/launch-deepseek-harness.ps1 -NoOpen`。
+- 部署文件与 git blob 比对时注意行尾：工作树可能是 CRLF，`diff -rq` 会误报；用
+  `git show HEAD:<file> | sha256sum` 对比部署文件，或 `diff -rq --strip-trailing-cr`。
 - E2E 习惯：role 定位器在本应用常超时，用 `tab.playwright.evaluate()` + `dispatchEvent(new MouseEvent("click",{bubbles:true}))`；输入框用 React 原生 value setter + `input` 事件。
 - 撤回是重操作：E2E 请在一次性测试会话里做，完事归档会话（0.1.7 起核心会话菜单无「删除会话」项，脚本已按 `撤回回归测试` 前缀自动归档；磁盘残留随后续停服窗口清理）。
