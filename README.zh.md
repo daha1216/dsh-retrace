@@ -5,7 +5,7 @@
 **撤回 · 编辑重发 · 重新生成**，加上**写安全**的会话版本化 —— DeepSeek Harness 的
 **Agent 业务层（生产级保证）** 实现。
 
-[![Version](https://img.shields.io/badge/version-0.4.82-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
+[![Version](https://img.shields.io/badge/version-0.4.83-blue)](https://github.com/daha1216/dsh-retrace/commits/main)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/daha1216/dsh-retrace/blob/main/LICENSE)
 [![DSH plugin](https://img.shields.io/badge/DSH-plugin-4A90D9)](https://github.com/topics/dsh-plugin)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/daha1216/dsh-retrace/pulls)
@@ -15,7 +15,7 @@
 </div>
 
 > 本仓库是 [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace) 的个人兼容修复
-> Fork（维护者 daha1216），当前版本 **0.4.82**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
+> Fork（维护者 daha1216），当前版本 **0.4.83**。0.4.50–0.4.70 的数据安全、体验与深色模式修复见下方
 > 「更新记录」；安装请从本 Fork 的 GitHub 直装（详见安装章节）。
 
 **撤回 / 编辑重发 / 重新生成** —— 每个会话都该有的三个操作。但回退不只是「撤掉一条
@@ -179,7 +179,14 @@ Client 半区会依据包内 `dsh.client` 元数据被自动打包进 Web 客户
 
 ---
 
-## 🔄 更新记录（0.4.50 → 0.4.82）
+## 🔄 更新记录（0.4.50 → 0.4.83）
+
+- **0.4.83** — 修复「图片卸载过的会话无法撤回」。官方回放预检现在把宿主的消息投影表
+  （`sessions.messageProjections`）作为第 6 个参数交给 `Session.fromRestore`，`image/offload`
+  这类插件自有消息变更在回放时就有了自己的解释器。此前只传 5 个参数，宿主仍能正常服务的会话
+  会被自己的预检判成非法（`invalid seed event at index N: session event "image/offload"
+  requires a message projection`），该会话里的每一次撤回都会失败。若宿主确实没有注册对应投影，
+  预检仍然拒绝，安全闸门没有放松。
 
 - **0.4.82** — 把请求作用域与原始输入的加固移植到 0.4.81 线上。`x-retrace-config` 改为
   经 `AsyncLocalStorage` 的请求级配置，不再是按会话粘住的 Map：合法请求头不会再泄漏到后续

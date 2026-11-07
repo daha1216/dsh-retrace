@@ -1,7 +1,7 @@
 # 🧭 dsh-retrace
 
 > A session time machine for DeepSeek Harness — a personal compatibility-fix fork of
-> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.82**.
+> [yamingmou/dsh-retrace](https://github.com/yamingmou/dsh-retrace). Current version: **0.4.83**.
 
 Recall a whole turn, edit-and-resend a past prompt, or regenerate a reply — while the
 conversation state and the workspace files it touched are versioned together. Every rollback
@@ -49,7 +49,15 @@ hot-load bundles. If `dsh` is not on your PATH, prefix the command with
 
 ---
 
-## 🔄 Recent changes (0.4.50 → 0.4.82)
+## 🔄 Recent changes (0.4.50 → 0.4.83)
+
+- **0.4.83** — recall works again in sessions whose images were offloaded. The official replay
+  preflight now hands the host registry's message projections (`sessions.messageProjections`)
+  to `Session.fromRestore`, so a plugin-owned message change such as `image/offload` has its
+  interpreter during replay. Passing only five arguments made the replay reject a session the
+  host was still serving — `invalid seed event at index N: session event "image/offload"
+  requires a message projection` — and every recall in that session failed. When no definition
+  exists anywhere the preflight still refuses, so the gate stays honest.
 
 - **0.4.82** — port the request-scope and raw-input hardening onto the 0.4.81 line.
   `x-retrace-config` is now request-scoped through `AsyncLocalStorage` instead of a sticky
